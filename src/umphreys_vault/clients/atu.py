@@ -128,6 +128,23 @@ class ATUClient:
         """Setlist rows for the most recent show (drives ``refresh``)."""
         return _as_dicts(await self._get("latest.json"))
 
+    async def upcoming_shows(self, limit: int = 300) -> list[dict[str, Any]]:
+        """Most-recent-first show rows, including scheduled future dates.
+
+        ATU's ``shows`` method lists every show, including upcoming tour dates
+        that have a venue/date but no setlist yet. Ordering by date descending
+        and slicing the top N grabs every future show (there are far fewer than
+        ``limit`` scheduled ahead) plus a tail of just-played shows; the caller
+        filters to ``date > today``. The default limit is generous so a long
+        tour announcement can't push the nearest show out of the window.
+        """
+        return _as_dicts(
+            await self._get(
+                "shows.json",
+                params={"order_by": "showdate", "direction": "desc", "limit": limit},
+            )
+        )
+
     # ---- catalog ------------------------------------------------------
 
     async def songs(self) -> list[dict[str, Any]]:

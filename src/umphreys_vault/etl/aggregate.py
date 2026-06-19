@@ -46,10 +46,14 @@ log = logging.getLogger(__name__)
 # played in the corpus) are reset to NULL via the LEFT JOIN.
 _AGGREGATE_SQL = """
 WITH shows_ranked AS (
+    -- Only PLAYED shows (those with a setlist) count toward gap. Scheduled
+    -- future shows live in `shows` too (for the predict form) but have no
+    -- setlist_entries, so they must not inflate every song's gap.
     SELECT
-        date,
-        (ROW_NUMBER() OVER (ORDER BY date DESC) - 1) AS shows_after
-    FROM shows
+        s.date,
+        (ROW_NUMBER() OVER (ORDER BY s.date DESC) - 1) AS shows_after
+    FROM shows s
+    WHERE EXISTS (SELECT 1 FROM setlist_entries se WHERE se.show_date = s.date)
 ),
 song_stats AS (
     SELECT

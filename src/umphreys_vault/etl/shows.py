@@ -208,6 +208,75 @@ async def load_setlist_rows(
     return totals
 
 
+async def load_upcoming_shows(
+    pool: asyncpg.Pool,
+    rows: list[dict[str, Any]],
+    venue_map: dict[int, str],
+    today: dt.date | None = None,
+    dry_run: bool = False,
+) -> int:
+    """Upsert scheduled future shows (date > today) with venue but no setlist.
+
+    Rows come from ATU's ``shows`` method (show/venue/tour fields, no songs).
+    This is what lets the predict form target the next show before it's played;
+    the per-song gap aggregate deliberately ignores setlist-less shows, so these
+    rows never inflate gaps.
+    """
+    today = today or dt.date.today()
+    # Dates that already have a setlist are played shows — never overwrite them
+    # (load_upcoming would blank their show_notes). Using ``>= today`` (not
+    # ``> today``) so the show-happening-today still loads while nix1's UTC
+    # clock and the band's local date disagree across midnight.
+    played: set[dt.date] = set()
+    if not dry_run:
+        async with pool.acquire() as conn:
+            played = {
+                row["show_date"]
+                for row in await conn.fetch("SELECT DISTINCT show_date FROM setlist_entries")
+            }
+    count = 0
+    for r in rows:
+        ds = r.get("showdate")
+        if not isinstance(ds, str) or len(ds) < 10:
+            continue
+        try:
+            d = dt.date.fromisoformat(ds[:10])
+        except ValueError:
+            continue
+        if d < today or d in played:
+            continue
+        if dry_run:
+            count += 1
+            continue
+        venue_slug = _resolve_venue_slug(r, venue_map)
+        tour_slug = _tour_slug_for(r)
+        show = {
+            "date": ds[:10],
+            "show_id": r.get("show_id"),
+            "show_order": r.get("showorder"),
+            "show_title": r.get("showtitle"),
+            "venue_slug": venue_slug,
+            "tour_slug": tour_slug,
+            "show_notes": "",
+            "permalink": r.get("permalink"),
+            "show_year": r.get("show_year") or r.get("showyear"),
+        }
+        venue_id = _safe_int(r.get("venue_id"))
+        async with pool.acquire() as conn, conn.transaction():
+            if venue_slug and (venue_id is None or venue_id not in venue_map):
+                await upsert_venues(conn, [_venue_stub(r, venue_slug)])
+            if tour_slug:
+                tour_stub = {
+                    "slug": tour_slug,
+                    "tour_id": r.get("tour_id"),
+                    "tourname": r.get("tourname"),
+                }
+                await upsert_tours(conn, [tour_stub])
+            await upsert_show(conn, show)
+        count += 1
+    return count
+
+
 async def find_max_show_date(pool: asyncpg.Pool) -> str | None:
     async with pool.acquire() as conn:
         row = await conn.fetchval("SELECT TO_CHAR(MAX(date), 'YYYY-MM-DD') FROM shows")

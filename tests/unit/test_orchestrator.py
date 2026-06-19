@@ -45,6 +45,7 @@ def _fake_atu() -> MagicMock:
     atu.list_years = AsyncMock(return_value=[1998])
     atu.setlists_by_year = AsyncMock(return_value=[{"showdate": "1998-01-21"}])
     atu.latest = AsyncMock(return_value=[{"showdate": "2026-06-18", "showyear": 2026}])
+    atu.upcoming_shows = AsyncMock(return_value=[])
     return atu
 
 
@@ -151,6 +152,7 @@ async def test_run_refresh_uses_latest_year(monkeypatch: pytest.MonkeyPatch) -> 
         return {}
 
     monkeypatch.setattr(orchestrator.shows, "load_setlist_rows", noop_rows)
+    monkeypatch.setattr(orchestrator.shows, "load_upcoming_shows", zero)
     monkeypatch.setattr(orchestrator.catalog, "load_venues", zero)
     monkeypatch.setattr(orchestrator.catalog, "venue_id_slug_map", empty_vmap)
     monkeypatch.setattr(orchestrator.enrichment, "load_jam_charts", zero)

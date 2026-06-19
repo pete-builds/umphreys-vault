@@ -142,6 +142,12 @@ async def run_backfill(
         summary["songs"] = await catalog.load_songs(atu, pool, dry_run=dry_run)
         rows_added += int(summary["songs"]) + int(summary["venues"])
 
+        # Scheduled future shows (no setlist) so the predict form has a target.
+        summary["upcoming"] = await shows.load_upcoming_shows(
+            pool, await atu.upcoming_shows(), venue_map, dry_run=dry_run
+        )
+        rows_added += int(summary["upcoming"])
+
         summary["jam_chart_entries"] = await enrichment.load_jam_charts(atu, pool, dry_run=dry_run)
         summary["appearances"] = await enrichment.load_appearances(atu, pool, dry_run=dry_run)
         rows_added += int(summary["jam_chart_entries"]) + int(summary["appearances"])
@@ -195,6 +201,10 @@ async def run_refresh(
         )
         summary["year_setlists"] = year_totals
         rows_added += int(year_totals.get("setlist_entries", 0))
+
+        summary["upcoming"] = await shows.load_upcoming_shows(
+            pool, await atu.upcoming_shows(), venue_map, dry_run=dry_run
+        )
 
         summary["jam_chart_entries"] = await enrichment.load_jam_charts(atu, pool, dry_run=dry_run)
         summary["appearances"] = await enrichment.load_appearances(atu, pool, dry_run=dry_run)

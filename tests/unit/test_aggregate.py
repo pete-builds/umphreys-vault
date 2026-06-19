@@ -179,7 +179,10 @@ def test_aggregate_sql_references_expected_columns() -> None:
     for col in ("debut_date", "last_play_date", "times_played", "gap_current"):
         assert col in sql, f"aggregate SQL no longer writes {col}"
     # Gap is derived from a newest-first row number over shows.
-    assert "ROW_NUMBER() OVER (ORDER BY date DESC)" in sql
+    assert "ROW_NUMBER() OVER (ORDER BY s.date DESC)" in sql
+    # Only played shows (with a setlist) count toward gap — scheduled future
+    # shows live in `shows` too and must not inflate gaps.
+    assert "EXISTS (SELECT 1 FROM setlist_entries se WHERE se.show_date = s.date)" in sql
     # Per-song stats come from setlist_entries joined to shows.
     assert "FROM setlist_entries" in sql
     assert "se.song_slug IS NOT NULL" in sql
