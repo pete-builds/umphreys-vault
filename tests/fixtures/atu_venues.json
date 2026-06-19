@@ -1,0 +1,26 @@
+{
+  "error": false,
+  "error_message": "",
+  "data": [
+    {
+      "venue_id": 1,
+      "venuename": "The Tabernacle",
+      "city": "Atlanta",
+      "state": "GA",
+      "country": "USA",
+      "zip": "",
+      "capacity": null,
+      "slug": "the-tabernacle-atlanta-ga-usa"
+    },
+    {
+      "venue_id": 2,
+      "venuename": "The Dome at Oakdale",
+      "city": "Wallingford",
+      "state": "CT",
+      "country": "USA",
+      "zip": "",
+      "capacity": null,
+      "slug": "the-dome-at-oakdale-wallingford-ct-usa"
+    }
+  ]
+}

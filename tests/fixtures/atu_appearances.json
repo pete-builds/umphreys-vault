@@ -1,0 +1,28 @@
+{
+  "error": false,
+  "error_message": "",
+  "data": [
+    {
+      "show_id": 1328240364,
+      "showdate": "1998-01-31",
+      "artist_id": 1,
+      "artist_name": "Umphrey's McGee",
+      "person_id": 178,
+      "personname": "Steve Krojniewski\n",
+      "slug": "steve-krojniewski",
+      "appearance_type": "guest musician",
+      "notes": "on percussion"
+    },
+    {
+      "show_id": 1328374951,
+      "showdate": "1998-02-11",
+      "artist_id": 1,
+      "artist_name": "Umphrey's McGee",
+      "person_id": 178,
+      "personname": "Steve Krojniewski\n",
+      "slug": "steve-krojniewski",
+      "appearance_type": "guest musician",
+      "notes": "on additional percussion"
+    }
+  ]
+}

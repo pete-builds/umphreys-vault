@@ -1,0 +1,29 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.py[cod]
+
+# Test artifacts
+.coverage
+coverage.xml
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local dev
+.venv/
+venv/
+
+# Docker overrides (host-specific)
+docker-compose.override.yml
+
+# Internal Forge build notes — gitignored on the public repo
+SESSION-RESUME.md
+PROBE-NOTES.md

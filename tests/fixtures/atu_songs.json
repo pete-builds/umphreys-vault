@@ -1,0 +1,24 @@
+{
+  "error": false,
+  "error_message": "",
+  "data": [
+    {
+      "id": 2,
+      "name": "#5",
+      "slug": "5",
+      "isoriginal": 1,
+      "original_artist": "Umphrey's McGee",
+      "created_at": "1000-01-01 00:00:00",
+      "updated_at": "1000-01-01 00:00:00"
+    },
+    {
+      "id": 3,
+      "name": "13 Days",
+      "slug": "13-days",
+      "isoriginal": 1,
+      "original_artist": "Umphrey's McGee",
+      "created_at": "1000-01-01 00:00:00",
+      "updated_at": "2023-02-26 04:29:59"
+    }
+  ]
+}

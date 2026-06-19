@@ -1,0 +1,78 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: umphreys-vault-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${PG_DB:-umphreys}"
+      POSTGRES_USER: "${PG_USER:-umphreys}"
+      POSTGRES_PASSWORD: "${PG_PASSWORD:?PG_PASSWORD is required}"
+    volumes:
+      - umphreys-vault-pg-data:/var/lib/postgresql/data
+    ports:
+      # LAN-only by default. Override with COMPOSE_PG_PORT to expose elsewhere.
+      - "127.0.0.1:${COMPOSE_PG_PORT:-5435}:5432"
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-umphreys} -d ${PG_DB:-umphreys}"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  umphreys-vault-etl:
+    image: umphreys-vault:0.1.0
+    build: .
+    container_name: umphreys-vault-etl
+    restart: "no"   # one-shot; cron invokes `docker compose run`
+    profiles: ["cron"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      PG_HOST: postgres
+      PG_PORT: 5432
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+
+  umphreys-vault-status:
+    image: umphreys-vault:0.1.0
+    build: .
+    container_name: umphreys-vault-status
+    restart: unless-stopped
+    profiles: ["status"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["serve-status"]
+    env_file:
+      - .env
+    environment:
+      PG_HOST: postgres
+      PG_PORT: 5432
+    ports:
+      - "${STATUS_PORT:-3719}:3719"
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:3719/healthz', timeout=5).status==200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  umphreys-vault-pg-data:
+    name: umphreys-vault-pg-data
