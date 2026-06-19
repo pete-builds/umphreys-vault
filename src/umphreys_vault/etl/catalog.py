@@ -38,3 +38,16 @@ async def load_venues(client: ATUClient, pool: asyncpg.Pool, dry_run: bool = Fal
         return len(venues)
     async with pool.acquire() as conn:
         return await upsert_venues(conn, venues)
+
+
+async def venue_id_slug_map(pool: asyncpg.Pool) -> dict[int, str]:
+    """Return a ``{venue_id: canonical_slug}`` map from the loaded venue catalog.
+
+    Setlist rows carry a ``venue_id`` but no slug; synthesising a slug from the
+    venue name can diverge from ATU's canonical slug and would then collide on
+    the ``venues.venue_id`` unique constraint. Resolving shows to the canonical
+    slug via this map keeps one row per venue.
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT venue_id, slug FROM venues WHERE venue_id IS NOT NULL")
+    return {int(r["venue_id"]): str(r["slug"]) for r in rows}

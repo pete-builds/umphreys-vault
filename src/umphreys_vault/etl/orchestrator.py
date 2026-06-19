@@ -122,16 +122,24 @@ async def run_backfill(
         summary["years"] = years
         log.info("Backfill: years queued", extra={"count": len(years)})
 
+        # Load the venue catalog FIRST so shows resolve to the canonical venue
+        # slug by venue_id. A slug synthesised from the venue name can diverge
+        # from ATU's canonical slug and would then collide on the
+        # venues.venue_id unique constraint.
+        summary["venues"] = await catalog.load_venues(atu, pool, dry_run=dry_run)
+        venue_map = {} if dry_run else await catalog.venue_id_slug_map(pool)
+
         per_year: dict[str, dict[str, int]] = {}
         for y in years:
             rows = await atu.setlists_by_year(y)
-            totals = await shows.load_setlist_rows(pool, rows, dry_run=dry_run)
+            totals = await shows.load_setlist_rows(
+                pool, rows, venue_map=venue_map, dry_run=dry_run
+            )
             per_year[str(y)] = totals
             rows_added += int(totals.get("setlist_entries", 0))
         summary["setlists_by_year"] = per_year
 
         summary["songs"] = await catalog.load_songs(atu, pool, dry_run=dry_run)
-        summary["venues"] = await catalog.load_venues(atu, pool, dry_run=dry_run)
         rows_added += int(summary["songs"]) + int(summary["venues"])
 
         summary["jam_chart_entries"] = await enrichment.load_jam_charts(atu, pool, dry_run=dry_run)
@@ -166,8 +174,15 @@ async def run_refresh(
     error: str | None = None
     rows_added = 0
     try:
+        # Refresh the venue catalog + build the id->slug map first, same reason
+        # as backfill: resolve shows to canonical venue slugs.
+        summary["venues"] = await catalog.load_venues(atu, pool, dry_run=dry_run)
+        venue_map = {} if dry_run else await catalog.venue_id_slug_map(pool)
+
         latest_rows = await atu.latest()
-        latest_totals = await shows.load_setlist_rows(pool, latest_rows, dry_run=dry_run)
+        latest_totals = await shows.load_setlist_rows(
+            pool, latest_rows, venue_map=venue_map, dry_run=dry_run
+        )
         summary["latest"] = latest_totals
         rows_added += int(latest_totals.get("setlist_entries", 0))
 
@@ -175,7 +190,9 @@ async def run_refresh(
         year = _year_of(latest_rows) or dt.date.today().year
         summary["year"] = year
         year_rows = await atu.setlists_by_year(year)
-        year_totals = await shows.load_setlist_rows(pool, year_rows, dry_run=dry_run)
+        year_totals = await shows.load_setlist_rows(
+            pool, year_rows, venue_map=venue_map, dry_run=dry_run
+        )
         summary["year_setlists"] = year_totals
         rows_added += int(year_totals.get("setlist_entries", 0))
 

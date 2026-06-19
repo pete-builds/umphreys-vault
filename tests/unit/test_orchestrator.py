@@ -147,7 +147,12 @@ async def test_run_refresh_uses_latest_year(monkeypatch: pytest.MonkeyPatch) -> 
     async def agg(*a: Any, **kw: Any) -> dict[str, int]:
         return {"songs_updated": 1, "songs_reset": 0}
 
+    async def empty_vmap(*a: Any, **kw: Any) -> dict[int, str]:
+        return {}
+
     monkeypatch.setattr(orchestrator.shows, "load_setlist_rows", noop_rows)
+    monkeypatch.setattr(orchestrator.catalog, "load_venues", zero)
+    monkeypatch.setattr(orchestrator.catalog, "venue_id_slug_map", empty_vmap)
     monkeypatch.setattr(orchestrator.enrichment, "load_jam_charts", zero)
     monkeypatch.setattr(orchestrator.enrichment, "load_appearances", zero)
     monkeypatch.setattr(orchestrator.aggregate, "recompute_song_stats", agg)

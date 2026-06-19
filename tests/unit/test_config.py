@@ -28,7 +28,7 @@ def test_settings_defaults_present(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.etl_throttle_atu_rps > 0
     assert "allthings.umphreys.com" in s.atu_base_url
     assert s.atu_artist_id == 1
-    assert s.status_port == 3716
+    assert s.status_port == 3719
 
 
 def test_settings_does_not_log_secret() -> None:

@@ -101,10 +101,24 @@ def _song_stub(row: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _show_record(date: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _resolve_venue_slug(row: dict[str, Any], venue_map: dict[int, str]) -> str | None:
+    """Prefer the canonical catalog slug (by venue_id); fall back to synthesis.
+
+    Resolving by ``venue_id`` keeps one row per venue even when the synthesised
+    name-based slug differs from ATU's canonical ``/venues.json`` slug.
+    """
+    venue_id = _safe_int(row.get("venue_id"))
+    if venue_id is not None and venue_id in venue_map:
+        return venue_map[venue_id]
+    return _venue_slug_for(row)
+
+
+def _show_record(
+    date: str, rows: list[dict[str, Any]], venue_map: dict[int, str]
+) -> dict[str, Any]:
     """Synthesise a ``shows`` record from a show's setlist rows."""
     head = rows[0]
-    venue_slug = _venue_slug_for(head)
+    venue_slug = _resolve_venue_slug(head, venue_map)
     tour_slug = _tour_slug_for(head)
     return {
         "date": date,
@@ -120,14 +134,20 @@ def _show_record(date: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 async def _persist_one_show(
-    pool: asyncpg.Pool, date: str, rows: list[dict[str, Any]]
+    pool: asyncpg.Pool, date: str, rows: list[dict[str, Any]], venue_map: dict[int, str]
 ) -> dict[str, int]:
     """Write one show + its venue/tour/songs/setlist_entries in a transaction."""
     head = rows[0]
-    show = _show_record(date, rows)
+    show = _show_record(date, rows, venue_map)
 
     venue_slug = show["venue_slug"]
-    venue_stub = _venue_stub(head, venue_slug) if venue_slug else None
+    venue_id = _safe_int(head.get("venue_id"))
+    # Only stub-insert a venue the catalog doesn't already cover. When the
+    # venue_id is in the catalog map, the canonical row already exists (with
+    # richer fields) and the show simply references it — inserting a stub under
+    # a divergent slug would duplicate the venue / collide on venue_id.
+    in_catalog = venue_id is not None and venue_id in venue_map
+    venue_stub = _venue_stub(head, venue_slug) if (venue_slug and not in_catalog) else None
     tour_slug = show["tour_slug"]
     tour_stub = (
         {"slug": tour_slug, "tour_id": head.get("tour_id"), "tourname": head.get("tourname")}
@@ -159,13 +179,17 @@ async def _persist_one_show(
 async def load_setlist_rows(
     pool: asyncpg.Pool,
     rows: list[dict[str, Any]],
+    venue_map: dict[int, str] | None = None,
     dry_run: bool = False,
 ) -> dict[str, int]:
     """Persist a batch of flat ATU setlist rows.
 
     Groups by show date, then writes each show in its own transaction. Used
-    for both a full year (backfill) and a single show (refresh).
+    for both a full year (backfill) and a single show (refresh). ``venue_map``
+    (venue_id -> canonical slug, from the venue catalog) lets shows reference
+    canonical venues; when omitted, venue slugs are synthesised from the name.
     """
+    venue_map = venue_map or {}
     grouped = group_rows_by_show(rows)
     totals: dict[str, int] = {"shows": 0, "setlist_entries": 0, "errors": 0}
 
@@ -175,7 +199,7 @@ async def load_setlist_rows(
                 totals["shows"] += 1
                 totals["setlist_entries"] += len(date_rows)
                 continue
-            counts = await _persist_one_show(pool, date, date_rows)
+            counts = await _persist_one_show(pool, date, date_rows, venue_map)
             for k, v in counts.items():
                 totals[k] = totals.get(k, 0) + v
         except Exception as exc:

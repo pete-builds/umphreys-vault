@@ -39,7 +39,7 @@ def test_tour_slug_derived(setlists_1998_atu: dict[str, Any]) -> None:
 
 def test_show_record_pulls_head_fields(setlists_1998_atu: dict[str, Any]) -> None:
     rows = setlists_1998_atu["data"]
-    rec = _show_record("1998-01-21", rows)
+    rec = _show_record("1998-01-21", rows, {})
     assert rec["date"] == "1998-01-21"
     assert rec["show_id"] == 1327337854
     assert rec["show_year"] == 1998
