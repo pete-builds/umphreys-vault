@@ -15,7 +15,10 @@ Backfill order:
 Refresh order:
   1. Latest show (``/latest.json``) plus the current year's setlists, to pick
      up any backfilled corrections within the year.
-  2. Enrichment, then aggregate.
+  2. Recent-window re-pull: re-fetch + upsert setlists for every show in a
+     trailing window (default 14 days) so a show whose setlist ATU enters AFTER
+     our daily run still backfills on the next run. ATU is the source of record.
+  3. Enrichment, then aggregate.
 """
 
 from __future__ import annotations
@@ -35,6 +38,11 @@ log = logging.getLogger(__name__)
 # Floor year used only if ``list_years`` returns nothing usable. Umphrey's
 # McGee's first show was 1998-01-21; 1997 is a safe lower bound.
 _YEAR_FLOOR = 1997
+
+# Default trailing window (days) the refresh re-pulls setlists for, so a show
+# whose setlist ATU enters late still backfills on the next daily run. Override
+# via ``REFRESH_RECENT_DAYS`` (settings.refresh_recent_days). 0 disables.
+_REFRESH_RECENT_DAYS = 14
 
 
 async def _start_run(pool: asyncpg.Pool, mode: str, source: str, args: dict[str, Any]) -> int:
@@ -169,12 +177,15 @@ async def run_refresh(
     *,
     concurrency: int = 4,
     dry_run: bool = False,
+    recent_days: int = _REFRESH_RECENT_DAYS,
 ) -> dict[str, Any]:
-    """Incremental refresh: the latest show plus the current year's setlists.
+    """Incremental refresh: latest show + current year + recent-window re-pull.
 
     ``concurrency`` is accepted for signature parity with backfill.
+    ``recent_days`` sets the trailing window re-pulled so late-entered setlists
+    backfill on the next run (``REFRESH_RECENT_DAYS``; 0 disables).
     """
-    args = {"concurrency": concurrency, "dry_run": dry_run}
+    args = {"concurrency": concurrency, "dry_run": dry_run, "recent_days": recent_days}
     run_id = await _start_run(pool, "refresh", "atu_v2", args)
     summary: dict[str, Any] = {"args": args}
     error: str | None = None
@@ -201,6 +212,14 @@ async def run_refresh(
         )
         summary["year_setlists"] = year_totals
         rows_added += int(year_totals.get("setlist_entries", 0))
+
+        # Re-pull setlists for the trailing window so a show whose setlist ATU
+        # enters AFTER our daily run (the late-entry bug) backfills next run.
+        recent = await _repull_recent_setlists(
+            pool, atu, venue_map, recent_days, dry_run=dry_run
+        )
+        summary["recent_window"] = recent
+        rows_added += int(recent.get("setlist_entries", 0))
 
         summary["upcoming"] = await shows.load_upcoming_shows(
             pool, await atu.upcoming_shows(), venue_map, dry_run=dry_run
@@ -245,6 +264,70 @@ async def _run_aggregate(pool: asyncpg.Pool, dry_run: bool) -> dict[str, int]:
     """Aggregate pass used inside backfill/refresh (no separate audit row;
     the parent run records it in its summary)."""
     return await aggregate.recompute_song_stats(pool, dry_run=dry_run)
+
+
+async def _recent_show_dates(
+    pool: asyncpg.Pool, recent_days: int, today: dt.date | None = None
+) -> list[str]:
+    """ISO dates of shows whose ``date`` falls in the trailing window.
+
+    Window is ``[today - recent_days, today]`` inclusive. Returns existing
+    ``shows`` rows only, so a single bounded query (no per-show DB calls). A
+    show that has a row but zero setlist_entries (the late-entry bug) is still
+    selected here, which is the whole point.
+    """
+    if recent_days <= 0:
+        return []
+    today = today or dt.date.today()
+    cutoff = today - dt.timedelta(days=recent_days)
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT TO_CHAR(date, 'YYYY-MM-DD') AS d FROM shows "
+            "WHERE date >= $1 AND date <= $2 ORDER BY date",
+            cutoff,
+            today,
+        )
+    return [str(r["d"]) for r in rows]
+
+
+async def _repull_recent_setlists(
+    pool: asyncpg.Pool,
+    atu: ATUClient,
+    venue_map: dict[int, str],
+    recent_days: int,
+    *,
+    dry_run: bool,
+    today: dt.date | None = None,
+) -> dict[str, Any]:
+    """Re-fetch + upsert setlists for every show in the trailing window.
+
+    Reuses the same ATU fetch (``setlists_by_date``) and persist path
+    (``shows.load_setlist_rows``) the rest of the ETL uses; idempotent via the
+    underlying upserts, so a show that already has its setlist is a no-op and a
+    late-entered one gets backfilled. Per-date failures are logged and counted,
+    never fatal to the refresh.
+    """
+    dates = await _recent_show_dates(pool, recent_days, today=today)
+    out: dict[str, Any] = {
+        "recent_days": recent_days,
+        "dates_checked": len(dates),
+        "setlist_entries": 0,
+        "errors": 0,
+    }
+    for d in dates:
+        try:
+            rows = await atu.setlists_by_date(d)
+            if not rows:
+                continue
+            totals = await shows.load_setlist_rows(
+                pool, rows, venue_map=venue_map, dry_run=dry_run
+            )
+            out["setlist_entries"] += int(totals.get("setlist_entries", 0))
+            out["errors"] += int(totals.get("errors", 0))
+        except Exception as exc:
+            out["errors"] += 1
+            log.exception("recent-window re-pull failed", extra={"date": d, "error": str(exc)})
+    return out
 
 
 def _year_of(rows: list[dict[str, Any]]) -> int | None:

@@ -52,10 +52,29 @@ class Settings(BaseSettings):
     )
     etl_request_timeout_s: float = Field(default=20.0, gt=0)
     etl_dry_run: bool = Field(default=False, description="If true, fetch + log but write nothing.")
+    refresh_recent_days: int = Field(
+        default=14,
+        ge=0,
+        description=(
+            "Trailing window (days) of shows the refresh re-fetches setlists for, "
+            "so a setlist ATU enters late backfills on the next daily run. 0 disables."
+        ),
+    )
 
     # ---- Status endpoint (optional) -----------------------------------
     status_host: str = Field(default="0.0.0.0")
     status_port: int = Field(default=3719)
+
+    # ---- X-setlist ingest endpoint ------------------------------------
+    # Shared secret the n8n workflow must present in the X-Ingest-Secret
+    # header. Empty by default => the ingest route is fail-closed (rejects
+    # every request with 503) until an operator sets INGEST_SECRET in .env.
+    # We do NOT refuse to start, so /healthz and /status stay available even
+    # when ingest is unconfigured.
+    ingest_secret: SecretStr = Field(
+        default=SecretStr(""),
+        description="Shared secret for POST /ingest/x-setlist (X-Ingest-Secret header).",
+    )
 
     # ---- Logging ------------------------------------------------------
     log_level: str = Field(default="INFO")

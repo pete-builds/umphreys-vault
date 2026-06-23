@@ -21,6 +21,8 @@ class FakePool:
     def __init__(self) -> None:
         self.executed: list[tuple[str, tuple[Any, ...]]] = []
         self.fetchval_returns = iter([42, 0, 0, 0])
+        # Canned ``shows`` rows the recent-window query selects (default empty).
+        self.recent_show_rows: list[dict[str, str]] = []
 
     def acquire(self) -> FakePool:
         return self
@@ -39,6 +41,12 @@ class FakePool:
         self.executed.append((sql, args))
         return next(self.fetchval_returns)
 
+    async def fetch(self, sql: str, *args: Any) -> list[dict[str, str]]:
+        self.executed.append((sql, args))
+        if "FROM shows" in sql:
+            return self.recent_show_rows
+        return []
+
 
 def _fake_atu() -> MagicMock:
     atu = MagicMock()
@@ -46,6 +54,7 @@ def _fake_atu() -> MagicMock:
     atu.setlists_by_year = AsyncMock(return_value=[{"showdate": "1998-01-21"}])
     atu.latest = AsyncMock(return_value=[{"showdate": "2026-06-18", "showyear": 2026}])
     atu.upcoming_shows = AsyncMock(return_value=[])
+    atu.setlists_by_date = AsyncMock(return_value=[])
     return atu
 
 
@@ -162,6 +171,67 @@ async def test_run_refresh_uses_latest_year(monkeypatch: pytest.MonkeyPatch) -> 
     summary = await orchestrator.run_refresh(pool, atu, dry_run=False)  # type: ignore[arg-type]
     assert summary["year"] == 2026
     atu.setlists_by_year.assert_awaited_with(2026)
+
+
+@pytest.mark.asyncio
+async def test_run_refresh_repulls_recent_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The late-entry bug fix: refresh must re-fetch + upsert setlists for every
+    # show in the trailing window, not just the latest one.
+    pool = FakePool()
+    pool.recent_show_rows = [{"d": "2026-06-18"}, {"d": "2026-06-19"}]
+    atu = _fake_atu()
+    # 2026-06-19 (Fairport) had a show row but ATU entered its setlist late.
+    atu.setlists_by_date = AsyncMock(
+        return_value=[{"showdate": "2026-06-19", "slug": "all-in-time", "position": 1}]
+    )
+
+    seen_dates: list[str] = []
+
+    async def fake_load_setlist_rows(_pool: Any, rows: Any, **kw: Any) -> dict[str, int]:
+        for r in rows:
+            if r.get("showdate"):
+                seen_dates.append(r["showdate"])
+        return {"shows": 1, "setlist_entries": len(rows), "errors": 0}
+
+    async def zero(*a: Any, **kw: Any) -> int:
+        return 0
+
+    async def agg(*a: Any, **kw: Any) -> dict[str, int]:
+        return {"songs_updated": 1, "songs_reset": 0}
+
+    async def empty_vmap(*a: Any, **kw: Any) -> dict[int, str]:
+        return {}
+
+    monkeypatch.setattr(orchestrator.shows, "load_setlist_rows", fake_load_setlist_rows)
+    monkeypatch.setattr(orchestrator.shows, "load_upcoming_shows", zero)
+    monkeypatch.setattr(orchestrator.catalog, "load_venues", zero)
+    monkeypatch.setattr(orchestrator.catalog, "venue_id_slug_map", empty_vmap)
+    monkeypatch.setattr(orchestrator.enrichment, "load_jam_charts", zero)
+    monkeypatch.setattr(orchestrator.enrichment, "load_appearances", zero)
+    monkeypatch.setattr(orchestrator.aggregate, "recompute_song_stats", agg)
+
+    summary = await orchestrator.run_refresh(pool, atu, dry_run=False)  # type: ignore[arg-type]
+
+    # Both recent dates were checked against ATU (source of record) ...
+    assert atu.setlists_by_date.await_count == 2
+    awaited = {c.args[0] for c in atu.setlists_by_date.await_args_list}
+    assert awaited == {"2026-06-18", "2026-06-19"}
+    # ... and the late-entered Fairport setlist flowed into the persist path.
+    assert "2026-06-19" in seen_dates
+    assert summary["recent_window"]["dates_checked"] == 2
+    assert summary["recent_window"]["recent_days"] == orchestrator._REFRESH_RECENT_DAYS
+
+
+@pytest.mark.asyncio
+async def test_recent_show_dates_respects_window_and_disable() -> None:
+    pool = FakePool()
+    pool.recent_show_rows = [{"d": "2026-06-19"}]
+    dates = await orchestrator._recent_show_dates(pool, 14)  # type: ignore[arg-type]
+    assert dates == ["2026-06-19"]
+    # recent_days=0 disables the re-pull entirely (no query, empty result).
+    pool2 = FakePool()
+    assert await orchestrator._recent_show_dates(pool2, 0) == []  # type: ignore[arg-type]
+    assert pool2.executed == []
 
 
 @pytest.mark.asyncio

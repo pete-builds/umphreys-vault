@@ -122,6 +122,7 @@ def refresh(ctx: click.Context, dry_run: bool) -> None:
                     atu,
                     concurrency=settings.etl_concurrency,
                     dry_run=dry_run,
+                    recent_days=settings.refresh_recent_days,
                 )
         finally:
             await atu.aclose()
