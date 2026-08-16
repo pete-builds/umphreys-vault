@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 # Builder stage
 # ---------------------------------------------------------------------------
-FROM python:3.13-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /build
 
@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir --target /wheels .
 # ---------------------------------------------------------------------------
 # Runtime stage
 # ---------------------------------------------------------------------------
-FROM python:3.13-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 # Apply Debian security patches on top of the base. Picks up CVE fixes between
 # base rebuilds.
