@@ -21,6 +21,7 @@ from umphreys_vault.etl.upserts import (
     replace_setlist_entries_for_show,
     slugify,
     upsert_appearances,
+    upsert_jam_chart_entries,
     upsert_songs,
     upsert_venues,
 )
@@ -183,3 +184,64 @@ def _appearances_conn(known_dates: set[dt.date]) -> AsyncMock:
 
     conn.transaction = lambda: _Txn()
     return conn
+
+
+# --- the empty-payload guard on the two full-corpus loaders ----------------
+#
+# Both loaders re-pull the ENTIRE corpus every run and replace it wholesale.
+# They used to DELETE first and inspect the payload second, and a `return`
+# inside `async with conn.transaction()` is not an exception -- asyncpg sees a
+# clean exit and COMMITS. So the wipe was durable, nothing raised, and the run
+# recorded status='ok'.
+#
+# This repo reaches that branch more easily than its phish-vault sibling: the
+# ATU client returns a bare [] on 404 and when the `data` key is absent, and
+# _to_date here swallows a ValueError instead of raising, so a renamed field
+# AND a changed date format both skip every row and land here.
+
+
+def _corpus_conn(existing: int, known_dates: set[dt.date] | None = None) -> AsyncMock:
+    """A conn reporting `existing` rows already in the target table."""
+    conn = _appearances_conn(known_dates or {dt.date(1998, 1, 31)})
+    conn.fetchval.return_value = existing
+    return conn
+
+
+@pytest.mark.asyncio
+async def test_empty_payload_refuses_to_wipe_a_populated_appearances_table() -> None:
+    conn = _corpus_conn(existing=4127)
+    with pytest.raises(ValueError, match="refusing to replace 4127"):
+        await upsert_appearances(conn, [])
+    conn.execute.assert_not_called()  # the DELETE never fires
+
+
+@pytest.mark.asyncio
+async def test_empty_payload_refuses_to_wipe_a_populated_jam_chart_table() -> None:
+    conn = _corpus_conn(existing=812)
+    with pytest.raises(ValueError, match="refusing to replace 812"):
+        await upsert_jam_chart_entries(conn, [])
+    conn.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_field_drift_is_refused_the_same_as_an_empty_response() -> None:
+    """The likelier failure: rows arrive, and not one of them is usable.
+
+    A renamed key or a changed date format produces exactly this, and _to_date
+    swallowing the parse error is what turns it into a silent full skip rather
+    than a raise.
+    """
+    conn = _corpus_conn(existing=99)
+    drifted = [{"show_date": "1998-01-31", "person_name": "Someone"}] * 5
+    with pytest.raises(ValueError, match="5 rows fetched, none usable"):
+        await upsert_appearances(conn, drifted)
+    conn.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_an_empty_payload_against_an_empty_table_is_a_no_op() -> None:
+    """First run, or a genuinely empty corpus. Nothing to protect, so no error."""
+    conn = _corpus_conn(existing=0)
+    assert await upsert_appearances(conn, []) == 0
+    assert await upsert_jam_chart_entries(conn, []) == 0
+    conn.execute.assert_not_called()
