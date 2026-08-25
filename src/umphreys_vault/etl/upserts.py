@@ -374,33 +374,58 @@ async def upsert_jam_chart_entries(
     if rows is None:
         rows = []
 
+    # Build the payload BEFORE deleting anything. The old order deleted first and
+    # inspected second, and a `return` inside `async with conn.transaction()` is
+    # not an exception -- asyncpg sees a clean exit and COMMITS, so the wipe was
+    # durable and the run recorded status='ok'.
+    #
+    # This client flattens more failures into "no data" than its phish-vault
+    # sibling does: a 404 returns a bare [], and _unwrap returns [] when the
+    # `data` key is absent, so a retired endpoint, a changed envelope and a
+    # genuinely empty corpus are indistinguishable before the loader sees them.
+    #
+    # And _to_date here SWALLOWS a ValueError rather than raising, so BOTH field
+    # drift variants -- a renamed key and a changed date format -- skip every row
+    # and reach the empty-payload branch. phish-vault is accidentally protected
+    # from the second one because its _to_date lets the parse error propagate.
+    #
+    # This is a full-corpus replace, so an empty payload against a populated table
+    # is refused rather than applied. The correct pattern already exists in this
+    # repo: load_setlist_rows groups by show date and only touches dates the
+    # payload actually contains.
+    known_show_dates: set[Any] = {r["date"] for r in await conn.fetch("SELECT date FROM shows")}
+    known_song_slugs: set[str] = {r["slug"] for r in await conn.fetch("SELECT slug FROM songs")}
+
+    payload = []
+    for r in rows:
+        show_date = _to_date(r.get("showdate"))
+        if show_date is None or show_date not in known_show_dates:
+            continue
+        slug = r.get("song_slug") or r.get("slug")
+        if slug is not None and slug not in known_song_slugs:
+            slug = None  # preserve row, drop dangling FK
+        payload.append(
+            (
+                show_date,
+                slug,
+                _to_text(r.get("songname") or r.get("song")),
+                _to_text(r.get("jamchartnote") or r.get("jamchart_notes") or r.get("notes")),
+                json.dumps(r),
+            )
+        )
+    if not payload:
+        existing = await conn.fetchval("SELECT COUNT(*) FROM jam_chart_entries")
+        if existing:
+            raise ValueError(
+                f"refusing to replace {existing} jam_chart_entries with an empty "
+                f"payload ({len(rows)} rows fetched, none usable). This is a "
+                f"full-corpus replace: an empty result here means the upstream "
+                f"call failed, its envelope changed, or a field was renamed."
+            )
+        return 0
+
     async with conn.transaction():
         await conn.execute("DELETE FROM jam_chart_entries")
-        if not rows:
-            return 0
-
-        known_show_dates: set[Any] = {r["date"] for r in await conn.fetch("SELECT date FROM shows")}
-        known_song_slugs: set[str] = {r["slug"] for r in await conn.fetch("SELECT slug FROM songs")}
-
-        payload = []
-        for r in rows:
-            show_date = _to_date(r.get("showdate"))
-            if show_date is None or show_date not in known_show_dates:
-                continue
-            slug = r.get("song_slug") or r.get("slug")
-            if slug is not None and slug not in known_song_slugs:
-                slug = None  # preserve row, drop dangling FK
-            payload.append(
-                (
-                    show_date,
-                    slug,
-                    _to_text(r.get("songname") or r.get("song")),
-                    _to_text(r.get("jamchartnote") or r.get("jamchart_notes") or r.get("notes")),
-                    json.dumps(r),
-                )
-            )
-        if not payload:
-            return 0
         await conn.executemany(
             """
             INSERT INTO jam_chart_entries (
@@ -429,32 +454,42 @@ async def upsert_appearances(conn: asyncpg.Connection, rows: list[dict[str, Any]
     if rows is None:
         rows = []
 
+    # Same reasoning as the jam-chart loader above: build the payload first, and
+    # refuse an empty payload against a populated table. Delete-then-inspect
+    # committed the wipe because a `return` exits the transaction cleanly.
+
+    known_show_dates: set[Any] = {r["date"] for r in await conn.fetch("SELECT date FROM shows")}
+
+    seen: dict[tuple[Any, Any, Any], tuple[Any, ...]] = {}
+    for r in rows:
+        show_date = _to_date(r.get("showdate"))
+        if show_date is None or show_date not in known_show_dates:
+            continue
+        person_slug = _to_text(r.get("slug"))
+        notes = _to_text(r.get("notes"))
+        key = (show_date, person_slug, notes)
+        seen[key] = (
+            show_date,
+            _to_int(r.get("person_id")),
+            _to_text(r.get("personname") or r.get("person_name")) or "",
+            person_slug,
+            _to_text(r.get("appearance_type")),
+            notes,
+        )
+    payload = list(seen.values())
+    if not payload:
+        existing = await conn.fetchval("SELECT COUNT(*) FROM appearances")
+        if existing:
+            raise ValueError(
+                f"refusing to replace {existing} appearances with an empty payload "
+                f"({len(rows)} rows fetched, none usable). This is a full-corpus "
+                f"replace: an empty result here means the upstream call failed, its "
+                f"envelope changed, or a field was renamed."
+            )
+        return 0
+
     async with conn.transaction():
         await conn.execute("DELETE FROM appearances")
-        if not rows:
-            return 0
-
-        known_show_dates: set[Any] = {r["date"] for r in await conn.fetch("SELECT date FROM shows")}
-
-        seen: dict[tuple[Any, Any, Any], tuple[Any, ...]] = {}
-        for r in rows:
-            show_date = _to_date(r.get("showdate"))
-            if show_date is None or show_date not in known_show_dates:
-                continue
-            person_slug = _to_text(r.get("slug"))
-            notes = _to_text(r.get("notes"))
-            key = (show_date, person_slug, notes)
-            seen[key] = (
-                show_date,
-                _to_int(r.get("person_id")),
-                _to_text(r.get("personname") or r.get("person_name")) or "",
-                person_slug,
-                _to_text(r.get("appearance_type")),
-                notes,
-            )
-        payload = list(seen.values())
-        if not payload:
-            return 0
         await conn.executemany(
             """
             INSERT INTO appearances (
