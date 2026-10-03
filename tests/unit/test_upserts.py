@@ -108,6 +108,40 @@ async def test_upsert_venues_derives_slug_when_missing() -> None:
     assert payload[0][1] == 8  # venue_id
 
 
+# The real row on nix1 from 2026-09-28: ATU decoded the venue's name, which
+# changed the slug it publishes, while venue_id stayed 1547.
+_OLD_SLUG = "bb-king-blues-club-amp-lucilles-cafe-new-york-ny-usa"
+_NEW_ROW = {
+    "venue_id": 1547,
+    "venuename": "BB King Blues Club & Lucille's Cafe",
+    "slug": "bb-king-blues-club-lucilles-cafe-new-york-ny-usa",
+    "city": "New York",
+    "state": "NY",
+    "country": "USA",
+}
+
+
+@pytest.mark.asyncio
+async def test_upsert_venues_keeps_stored_slug_when_upstream_renames() -> None:
+    conn = AsyncMock()
+    n = await upsert_venues(conn, [_NEW_ROW], {1547: _OLD_SLUG})
+    assert n == 1
+    payload = conn.executemany.await_args.args[1]
+    # The stored slug is reused, so ON CONFLICT (slug) updates the existing row
+    # instead of inserting a second row that collides on venue_id.
+    assert payload[0][0] == _OLD_SLUG
+    assert payload[0][1] == 1547
+    assert payload[0][2] == "BB King Blues Club & Lucille's Cafe"  # the name still updates
+
+
+@pytest.mark.asyncio
+async def test_upsert_venues_uses_upstream_slug_for_a_new_venue() -> None:
+    conn = AsyncMock()
+    await upsert_venues(conn, [_NEW_ROW], {9999: "some-other-venue"})
+    payload = conn.executemany.await_args.args[1]
+    assert payload[0][0] == _NEW_ROW["slug"]
+
+
 @pytest.mark.asyncio
 async def test_replace_setlist_entries_maps_fields(setlists_1998_atu: dict[str, Any]) -> None:
     conn = AsyncMock()

@@ -108,20 +108,36 @@ def slugify(s: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def upsert_venues(conn: asyncpg.Connection, rows: list[dict[str, Any]]) -> int:
+async def upsert_venues(
+    conn: asyncpg.Connection,
+    rows: list[dict[str, Any]],
+    venue_map: dict[int, str] | None = None,
+) -> int:
     """Upsert venue rows shaped from ``/venues.json`` setlist-derived stubs.
 
     Each row may come from the ``/venues.json`` catalog (``venuename``,
     ``venue_id``, ``slug``, ``city``, ``state``, ``country``) or from a
     setlist row stub (``venue_id``, ``venuename``, ``city``, ``state``,
     ``country`` — slug derived). The slug is the PK; ``venue_id`` is unique.
+
+    ``venue_map`` is the ``{venue_id: slug}`` already stored. A venue that is
+    already loaded keeps its stored slug even when upstream's slug changes:
+    ATU fixed venue 1547's encoded name (``&amp;`` to ``&``) on 2026-09-28,
+    which changed its slug, so the row arrived as a NEW slug, missed the
+    ``ON CONFLICT (slug)`` arm, and died on the ``venue_id`` unique constraint
+    on every run after. ``venue_id`` is the identity; the slug is our key and
+    ``shows.venue_slug`` points at it, so it must not move.
     """
     if not rows:
         return 0
+    known = venue_map or {}
     seen: dict[str, dict[str, Any]] = {}
     for r in rows:
         name = r.get("venuename") or r.get("name") or ""
-        slug = r.get("slug") or (slugify(name) if name else None)
+        vid = _to_int(r.get("venue_id"))
+        slug = (known.get(vid) if vid is not None else None) or (
+            r.get("slug") or (slugify(name) if name else None)
+        )
         if not slug:
             continue
         seen[slug] = {**r, "_slug": slug, "_name": name}

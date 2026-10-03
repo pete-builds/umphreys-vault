@@ -36,8 +36,9 @@ async def load_venues(client: ATUClient, pool: asyncpg.Pool, dry_run: bool = Fal
     log.info("Fetched venues", extra={"count": len(venues)})
     if dry_run:
         return len(venues)
+    venue_map = await venue_id_slug_map(pool)
     async with pool.acquire() as conn:
-        return await upsert_venues(conn, venues)
+        return await upsert_venues(conn, venues, venue_map)
 
 
 async def venue_id_slug_map(pool: asyncpg.Pool) -> dict[int, str]:
