@@ -23,22 +23,22 @@ classifiers = [
 dependencies = [
     "asyncpg==0.31.0",
     "click==8.5.0",
-    "fastapi==0.141.1",
+    "fastapi==0.142.2",
     "httpx==0.28.1",
     "pydantic==2.13.5",
     "pydantic-settings==2.15.0",
-    "python-dotenv==1.2.3",
+    "python-dotenv==1.2.4",
     "uvicorn==0.54.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "mypy==2.3.1",
+    "mypy==2.4.0",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
     "respx==0.23.1",
-    "ruff==0.16.9",
+    "ruff==0.16.10",
 ]
 
 [project.scripts]
