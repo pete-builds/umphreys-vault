@@ -21,11 +21,11 @@ classifiers = [
     "Topic :: Database",
 ]
 dependencies = [
-    "asyncpg==0.31.0",
+    "asyncpg==0.32.0",
     "click==8.5.0",
-    "fastapi==0.142.2",
+    "fastapi==0.143.0",
     "httpx==0.28.1",
-    "pydantic==2.13.5",
+    "pydantic==2.14.0",
     "pydantic-settings==2.15.0",
     "python-dotenv==1.2.4",
     "uvicorn==0.54.0",
@@ -38,7 +38,7 @@ dev = [
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
     "respx==0.23.1",
-    "ruff==0.16.10",
+    "ruff==0.17.0",
 ]
 
 [project.scripts]
