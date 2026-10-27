@@ -3,9 +3,9 @@
 #       --generate-hashes --python-version 3.13 --python-platform linux
 asyncpg==0.32.0
 click==8.5.0
-fastapi==0.143.3
+fastapi==0.162.0
 httpx==0.28.1
 pydantic==2.14.1
-pydantic-settings==2.16.0
+pydantic-settings==2.16.1
 python-dotenv==1.2.4
 uvicorn==0.54.0
