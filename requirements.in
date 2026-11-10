@@ -2,10 +2,10 @@
 #   uv pip compile requirements.in -o requirements.lock \
 #       --generate-hashes --python-version 3.13 --python-platform linux
 asyncpg==0.32.0
-click==8.5.0
-fastapi==0.162.0
+click==8.5.1
+fastapi==0.162.1
 httpx==0.28.1
-pydantic==2.14.2
+pydantic==2.14.3
 pydantic-settings==2.16.2
 python-dotenv==1.2.4
 uvicorn==0.54.0
