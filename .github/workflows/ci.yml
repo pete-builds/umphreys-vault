@@ -44,3 +44,46 @@ jobs:
 
       - name: Pytest
         run: pytest -q
+
+  image:
+    name: Docker build + interpreter guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: umphreys-vault:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Assert the image ships the Python minor version CI tests on
+        # Guard rail for base-image bumps. The test job runs on setup-python, so
+        # nothing else here ever executes the image's own interpreter. A
+        # Dependabot bump of the FROM tag (for example 3.14 to 3.15) would go
+        # green while shipping a runtime nothing exercised. --entrypoint is
+        # required: the image's ENTRYPOINT is the CLI itself.
+        run: |
+          docker run --rm --entrypoint python umphreys-vault:ci -c '
+          import sys
+          want = (3, 13)
+          got = sys.version_info[:2]
+          assert got == want, (
+              f"image ships Python {sys.version.split()[0]}, but the test job "
+              f"targets {want[0]}.{want[1]}. Fix the Dockerfile FROM tag, or "
+              f"retarget the test job and this guard together."
+          )
+          print(f"image Python {sys.version.split()[0]} matches target {want[0]}.{want[1]}")
+          '
+
+      - name: Smoke the image (package imports, CLI answers through its entrypoint)
+        # Neither command touches the network, the database or any secret:
+        # --help exits before the CLI loads settings.
+        run: |
+          docker run --rm --entrypoint python umphreys-vault:ci -c 'import umphreys_vault.cli'
+          docker run --rm umphreys-vault:ci --help
