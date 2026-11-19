@@ -27,8 +27,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          # Matches the runtime image (Dockerfile: python:3.14-slim).
-          python-version: "3.14"
+          # Matches the runtime image (Dockerfile: python:3.15-slim).
+          python-version: "3.15"
 
       - name: Install
         run: |
@@ -71,7 +71,7 @@ jobs:
         run: |
           docker run --rm --entrypoint python umphreys-vault:ci -c '
           import sys
-          want = (3, 14)
+          want = (3, 15)
           got = sys.version_info[:2]
           assert got == want, (
               f"image ships Python {sys.version.split()[0]}, but the test job "
